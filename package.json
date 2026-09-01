@@ -9,7 +9,7 @@
     "messaging",
     "webhook"
   ],
-  "homepage": "https://docs.relayapp.im/integrations/chat-sdk",
+  "homepage": "https://docs.relayapp.im/ecosystem/chat-sdk",
   "bugs": {
     "url": "https://github.com/RelayMessenger/Relay-Chat-SDK/issues"
   },
