@@ -59,3 +59,5 @@ jobs:
       - run: npm run test:all
       - run: npm audit --audit-level=high
       - run: npm publish --access public --tag staging --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
