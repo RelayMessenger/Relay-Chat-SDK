@@ -10,9 +10,7 @@ import {
   toPlainText,
   type AdapterPostableMessage,
   type Attachment,
-  type FileUpload,
 } from "chat";
-import type { RelayClient } from "./client.js";
 import type { RelayOutgoingPart } from "./types.js";
 
 export const RELAY_MAX_TEXT_PART_LENGTH = 10_000;
@@ -193,107 +191,35 @@ export function textParts(value: string): RelayOutgoingPart[] {
   return result;
 }
 
-async function bytesFrom(
-  data: Blob | ArrayBuffer | Uint8Array,
-): Promise<Uint8Array<ArrayBuffer>> {
-  if (data instanceof Blob) {
-    return new Uint8Array(await data.arrayBuffer());
-  }
-  if (data instanceof ArrayBuffer) {
-    return new Uint8Array(data.slice(0));
-  }
-  return new Uint8Array(
-    data.buffer.slice(
-      data.byteOffset,
-      data.byteOffset + data.byteLength,
-    ) as ArrayBuffer,
-  );
-}
-
-async function uploadPart(
-  client: RelayClient,
-  input: {
-    data: Blob | ArrayBuffer | Uint8Array;
-    filename: string;
-    height?: number;
-    mimeType?: string;
-    width?: number;
-  },
-): Promise<RelayOutgoingPart> {
-  const body = await bytesFrom(input.data);
-  if (
-    body.byteLength < 1 ||
-    body.byteLength > RELAY_MAX_ATTACHMENT_BYTES
-  ) {
-    throw new ValidationError(
-      "relay",
-      `Relay attachments must contain 1–${RELAY_MAX_ATTACHMENT_BYTES} bytes`,
-    );
-  }
-  if (!input.filename || input.filename.length > 255) {
-    throw new ValidationError(
-      "relay",
-      "Relay attachment filenames must contain 1–255 characters",
-    );
-  }
-  const allocation = await client.uploadAttachment({
-    body,
-    contentType: contentTypeFor(input.filename, input.mimeType),
-    filename: input.filename,
-    ...(input.height !== undefined ? { height: input.height } : {}),
-    ...(input.width !== undefined ? { width: input.width } : {}),
-  });
-  return { attachment_id: allocation.attachment_id, type: "media" };
-}
-
 async function attachmentPart(
-  client: RelayClient,
   attachment: Attachment,
 ): Promise<RelayOutgoingPart> {
   if (attachment.url?.startsWith("https://")) {
     return { type: "media", url: attachment.url };
   }
-  const data = attachment.data ?? (await attachment.fetchData?.());
-  if (!data) {
-    throw new ValidationError(
-      "relay",
-      `Attachment ${JSON.stringify(
-        attachment.name ?? "(unnamed)",
-      )} needs a public HTTPS URL or bytes`,
-    );
-  }
-  return uploadPart(client, {
-    data,
-    filename: attachment.name ?? "attachment",
-    ...(attachment.height !== undefined
-      ? { height: attachment.height }
-      : {}),
-    ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
-    ...(attachment.width !== undefined ? { width: attachment.width } : {}),
-  });
-}
-
-async function filePart(
-  client: RelayClient,
-  file: FileUpload,
-): Promise<RelayOutgoingPart> {
-  return uploadPart(client, {
-    data: file.data,
-    filename: file.filename,
-    ...(file.mimeType ? { mimeType: file.mimeType } : {}),
-  });
+  throw new ValidationError(
+    "relay",
+    `Attachment ${JSON.stringify(
+      attachment.name ?? "(unnamed)",
+    )} needs a public HTTPS URL. Allocate and upload retryable bytes with `
+      + "@relaymessenger/sdk before posting through Chat SDK.",
+  );
 }
 
 export async function buildRelayParts(
-  client: RelayClient,
   message: AdapterPostableMessage,
 ): Promise<RelayOutgoingPart[]> {
   const parts = textParts(postableText(message));
   for (const attachment of extractPostableAttachments(message)) {
-    parts.push(await attachmentPart(client, attachment));
+    parts.push(await attachmentPart(attachment));
   }
   for (const file of extractFiles(message)) {
-    parts.push(await filePart(client, file));
+    throw new ValidationError(
+      "relay",
+      `File ${JSON.stringify(file.filename)} needs a public HTTPS URL. `
+        + "Allocate and upload retryable bytes with @relaymessenger/sdk before "
+        + "posting through Chat SDK.",
+    );
   }
   if (parts.length > RELAY_MAX_MESSAGE_PARTS) {
     throw new ValidationError(

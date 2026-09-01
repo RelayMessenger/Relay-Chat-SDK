@@ -153,6 +153,21 @@ describe("RelayAdapter interface", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("rejects local bytes before allocation so retries cannot change the body", async () => {
+    const { adapter, fetchMock } = adapterHarness();
+    await expect(
+      adapter.postMessage(THREAD_ID, {
+        files: [{
+          data: new Uint8Array([1, 2, 3]).buffer,
+          filename: "photo.png",
+          mimeType: "image/png",
+        }],
+        raw: "",
+      }),
+    ).rejects.toThrow(/public HTTPS URL/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("buffers streams into one canonical message and no-ops empty streams", async () => {
     const { adapter, calls, fetchMock } = adapterHarness();
     async function* content() {
@@ -488,7 +503,7 @@ describe("Relay webhook handling", () => {
     expect(sends[1]?.body).toBe(sends[0]?.body);
   });
 
-  it("advances the send ordinal only after each committed message", async () => {
+  it("reserves a distinct send ordinal for each logical Message", async () => {
     const keys: Array<string | null> = [];
     const fetchMock = vi.fn(
       async (_input: RequestInfo | URL, init?: RequestInit) => {
@@ -522,6 +537,74 @@ describe("Relay webhook handling", () => {
       `relay-chat-sdk:${IDS.event}:0`,
       `relay-chat-sdk:${IDS.event}:1`,
     ]);
+  });
+
+  it("never reuses an ambiguous failed send ordinal for a different Message", async () => {
+    const sends: Array<{ body: string; key: string | null }> = [];
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
+        sends.push({
+          body: String(init?.body),
+          key: new Headers(init?.headers).get("idempotency-key"),
+        });
+        if (sends.length === 1) {
+          throw new TypeError("response lost after dispatch");
+        }
+        return jsonResponse(sentMessage("second"), 202);
+      },
+    );
+    const adapter = createRelayAdapter({
+      fetch: fetchMock as typeof fetch,
+      token: "agent-token",
+      webhookSecret: WEBHOOK_SECRET,
+    });
+    const chat = createMockChatInstance({
+      overrides: {
+        processMessage: async (inboundAdapter, threadId) => {
+          const [first, second] = await Promise.allSettled([
+            inboundAdapter.postMessage(threadId, "first"),
+            inboundAdapter.postMessage(threadId, "second"),
+          ]);
+          expect(first.status).toBe("rejected");
+          expect(second.status).toBe("fulfilled");
+        },
+      },
+    });
+    await adapter.initialize(chat);
+    const response = await adapter.handleWebhook(
+      await signedRequest(envelope("message.received")),
+    );
+    expect(response.status).toBe(200);
+    expect(sends.map(({ key }) => key)).toEqual([
+      `relay-chat-sdk:${IDS.event}:0`,
+      `relay-chat-sdk:${IDS.event}:1`,
+    ]);
+    expect(sends[0]?.body).not.toBe(sends[1]?.body);
+  });
+
+  it("accepts a signed valid non-ASCII Message envelope above one MiB", async () => {
+    const { adapter } = adapterHarness();
+    const chat = createMockChatInstance();
+    await adapter.initialize(chat);
+    const value = "界".repeat(4_000);
+    const large = envelope(
+      "message.received",
+      webhookMessage({
+        parts: Array.from({ length: 100 }, () => ({
+          type: "text" as const,
+          value,
+        })),
+      }) as unknown as Record<string, unknown>,
+    );
+    const encoded = JSON.stringify(large);
+    expect(new TextEncoder().encode(encoded).byteLength).toBeGreaterThan(
+      1_048_576,
+    );
+    const response = await adapter.handleWebhook(
+      await signedRequest(large),
+    );
+    expect(response.status).toBe(200);
+    expect(chat.processMessage).toHaveBeenCalledOnce();
   });
 
   it("lets Relay reject changed recovery content under the same key", async () => {

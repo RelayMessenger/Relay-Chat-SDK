@@ -374,7 +374,7 @@ export class RelayAdapter
         "Relay posts outside an inbound webhook require idempotencyKeyResolver",
       );
     }
-    const parts = await buildRelayParts(this.client, message);
+    const parts = await buildRelayParts(message);
     if (parts.length === 0) {
       return this.noopResult(chatId, threadId);
     }
@@ -427,11 +427,12 @@ export class RelayAdapter
       release = resolve;
     });
     await previous;
+    const ordinal = turn.sent;
+    turn.sent += 1;
     try {
       const result = await send(
-        inboundIdempotencyKey(turn.eventId, turn.sent),
+        inboundIdempotencyKey(turn.eventId, ordinal),
       );
-      turn.sent += 1;
       return result;
     } finally {
       release();

@@ -126,7 +126,7 @@ contract tests and is excluded from the npm package.
 | `reply` | Same route with `message.reply_to` |
 | `stream` | Buffered, then one canonical Message; never partial bubbles |
 | outbound public-URL media | Message `media` part |
-| outbound bytes/files | `POST /v1/attachments`, then opaque `PUT` |
+| outbound bytes/files | Explicitly allocate/upload with `@relaymessenger/sdk`, then post a stable public HTTPS URL |
 | inbound media | Chat SDK `Attachment` |
 | `addReaction`, `removeReaction` | `POST /v1/messages/{messageId}/reactions` |
 | `startTyping`, `endTyping` | `POST`/`DELETE /v1/chats/{chatId}/typing` |
@@ -137,8 +137,11 @@ contract tests and is excluded from the npm package.
 
 Relay text parts are plain text and are limited to 10,000 UTF-16 code units.
 Long Chat SDK text is split without breaking surrogate pairs. A Relay Message
-is limited to 100 parts. A public HTTPS attachment URL is sent directly; bytes
-use the v1 allocation-and-upload flow.
+is limited to 100 parts. A public HTTPS attachment URL is sent directly.
+Automatic byte/file uploads are rejected because a fresh Attachment allocation
+would change the Message body after an ambiguous send. Allocate and upload with
+`@relaymessenger/sdk`, retain that prepared identity durably, then give this
+adapter the stable HTTPS URL.
 
 Think's `thread.post(callback.stream())` path is safe when the stream is empty:
 the adapter returns a local no-op result so Chat SDK does not enter its
