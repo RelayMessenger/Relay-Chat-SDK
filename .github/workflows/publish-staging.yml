@@ -24,8 +24,14 @@ jobs:
           fetch-depth: 0
 
       - name: Prove exact staging commit
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
         run: |
-          test "$(git rev-parse HEAD)" = "${{ inputs.release_sha }}"
+          case "$RELEASE_SHA" in
+            (*[!0-9a-f]*|"") echo "release_sha must be lowercase hexadecimal" >&2; exit 1 ;;
+          esac
+          test "${#RELEASE_SHA}" -eq 40
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
           git fetch origin staging
           test "$(git rev-parse HEAD)" = "$(git rev-parse origin/staging)"
 
